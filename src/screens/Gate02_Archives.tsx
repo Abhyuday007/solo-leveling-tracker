@@ -1,229 +1,141 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, SafeAreaView, ImageBackground, ScrollView, TouchableOpacity, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { View, Text, StyleSheet, SafeAreaView, ScrollView, ActivityIndicator } from 'react-native';
+import { MotiView } from 'moti';
 import { supabase } from '../../supabase';
-
-const ARCHIVE_ART = { uri: 'https://images.unsplash.com/photo-1507842217343-583bb7270b66?q=80&w=1000&auto=format&fit=crop' }; 
+import { useIsFocused } from '@react-navigation/native'; // Refreshes data when you switch tabs
 
 export default function Gate02_Archives() {
-  const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [totalXp, setTotalXp] = useState(0);
+  const [historyLog, setHistoryLog] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   
-  // Modal State for New Campaigns
-  const [isModalVisible, setModalVisible] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [newTarget, setNewTarget] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const isFocused = useIsFocused(); // Re-runs fetch every time you open this tab
 
   useEffect(() => {
-    fetchCampaigns();
-  }, []);
-
-  async function fetchCampaigns() {
-    setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data, error } = await supabase
-      .from('campaigns')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.error('Archive Error:', error.message);
-    } else if (data) {
-      setCampaigns(data);
+    if (isFocused) {
+      fetchArchives();
     }
-    setLoading(false);
-  }
+  }, [isFocused]);
 
-  // Create a new long-term goal
-  async function addCampaign() {
-    if (!newTitle.trim() || !newTarget.trim() || isNaN(Number(newTarget))) {
-      alert("System Error: Invalid parameters. Target must be a number.");
-      return;
+  const fetchArchives = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('user_campaigns')
+        .select('total_xp, combat_log')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        setTotalXp(data.total_xp || 0);
+        setHistoryLog(data.combat_log || []);
+      }
+    } catch (error) {
+      console.error("[Gate 02 Error]", error);
+    } finally {
+      setIsLoading(false);
     }
+  };
 
-    setIsSubmitting(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    
-    if (!user) return;
-
-    const { data, error } = await supabase
-      .from('campaigns')
-      .insert([{
-        user_id: user.id,
-        title: newTitle,
-        target_progress: Number(newTarget),
-        current_progress: 0,
-        status: 'ACTIVE'
-      }])
-      .select();
-
-    if (error) {
-      alert(`Database Error: ${error.message}`);
-    } else if (data) {
-      setCampaigns(prev => [data[0], ...prev]);
-      setModalVisible(false);
-      setNewTitle('');
-      setNewTarget('');
-    }
-    setIsSubmitting(false);
-  }
-
-  // Increment progress when you tap a card
-  async function incrementProgress(id: string, current: number, target: number) {
-    if (current >= target) return; // Already finished
-    
-    const newProgress = current + 1;
-    const newStatus = newProgress >= target ? 'CONQUERED' : 'ACTIVE';
-
-    // Optimistic UI Update for instant feedback
-    setCampaigns(currentCamps => 
-      currentCamps.map(c => 
-        c.id === id ? { ...c, current_progress: newProgress, status: newStatus } : c
-      )
-    );
-
-    // Sync to Cloud
-    const { error } = await supabase
-      .from('campaigns')
-      .update({ current_progress: newProgress, status: newStatus })
-      .eq('id', id);
-
-    if (error) {
-      console.error("Failed to sync progression:", error.message);
-    }
-  }
+  // Level Math
+  const currentLevel = Math.floor(totalXp / 500) + 1;
+  const currentXPInLevel = totalXp % 500;
+  const xpToNextLevel = 500;
+  const progressPercentage = (currentXPInLevel / xpToNextLevel) * 100;
 
   return (
-    <View style={styles.container}>
-      <ImageBackground source={ARCHIVE_ART} style={styles.artBackground}>
-        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)', '#000000']} style={styles.gradientFade}>
-          <SafeAreaView style={styles.headerSafeArea}>
-            <Text style={styles.gateTitle}>GATE 02</Text>
-            <Text style={styles.gateSubtitle}>MASTER ARCHIVES</Text>
-          </SafeAreaView>
-        </LinearGradient>
-      </ImageBackground>
-
-      <View style={styles.voidContent}>
-        <View style={styles.headerRow}>
-          <Text style={styles.sectionHeader}>ACTIVE CAMPAIGNS</Text>
-          <TouchableOpacity onPress={() => setModalVisible(true)}>
-            <Text style={styles.addText}>+ DECLARE</Text>
-          </TouchableOpacity>
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        
+        <View style={styles.header}>
+          <Text style={styles.systemSub}>GATE 02</Text>
+          <Text style={styles.systemTitle}>THE ARCHIVES</Text>
         </View>
 
-        {loading ? (
-          <ActivityIndicator color="#ffffff" style={{marginTop: 40}} />
-        ) : campaigns.length === 0 ? (
-          <Text style={styles.emptyText}>THE ARCHIVES ARE EMPTY. DECLARE A CAMPAIGN.</Text>
+        {isLoading ? (
+          <ActivityIndicator size="large" color="#ffffff" style={{ marginTop: 40 }} />
         ) : (
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
-            {campaigns.map((goal) => {
-              const progressPercent = Math.min((goal.current_progress / goal.target_progress) * 100, 100);
-              const isConquered = goal.status === 'CONQUERED';
+          <>
+            <View style={styles.trackerContainer}>
+              <View style={styles.levelHeader}>
+                <Text style={styles.levelText}>CURRENT RANK: LEVEL {currentLevel}</Text>
+                <Text style={styles.xpText}>{currentXPInLevel} / {xpToNextLevel} XP</Text>
+              </View>
               
-              return (
-                <TouchableOpacity 
-                  key={goal.id} 
-                  style={[styles.campaignCard, isConquered && styles.campaignCardConquered]} 
-                  activeOpacity={0.7}
-                  onPress={() => incrementProgress(goal.id, goal.current_progress, goal.target_progress)}
-                >
-                  <View style={styles.cardHeader}>
-                    <Text style={[styles.campaignStatus, isConquered && styles.textMuted]}>[{goal.status}]</Text>
-                    <Text style={[styles.campaignProgress, isConquered && styles.textMuted]}>
-                      {goal.current_progress} / {goal.target_progress}
-                    </Text>
-                  </View>
-                  
-                  <Text style={[styles.campaignTitle, isConquered && styles.textMuted]}>{goal.title}</Text>
-                  
-                  <View style={styles.progressBarBg}>
-                    <View style={[styles.progressBarFill, { width: `${progressPercent}%` }, isConquered && { backgroundColor: '#4d4d4d' }]} />
-                  </View>
-                </TouchableOpacity>
-              )
-            })}
-          </ScrollView>
-        )}
+              <View style={styles.barBackground}>
+                <MotiView 
+                  key={`bar-${totalXp}`}
+                  from={{ width: '0%' }}
+                  animate={{ width: `${progressPercentage}%` }}
+                  transition={{ type: 'spring', damping: 15 }}
+                  style={styles.barFill}
+                />
+              </View>
+              <Text style={styles.nextLevelSub}>{(xpToNextLevel - currentXPInLevel)} XP UNTIL LEVEL {currentLevel + 1}</Text>
+            </View>
 
-        {/* DECLARE CAMPAIGN MODAL */}
-        <Modal visible={isModalVisible} animationType="fade" transparent={true}>
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.systemVoice}>SYSTEM ARCHIVE</Text>
-              <Text style={styles.modalTitle}>DECLARE MASTER CAMPAIGN</Text>
+            <View style={styles.historyContainer}>
+              <Text style={styles.historyTitle}>COMBAT LOG</Text>
               
-              <TextInput 
-                style={styles.inputBox} 
-                placeholder="e.g., The 30LPA Tech Vanguard" 
-                placeholderTextColor="#4d4d4d" 
-                value={newTitle} 
-                onChangeText={setNewTitle} 
-              />
-              <TextInput 
-                style={styles.inputBox} 
-                placeholder="Target Number (e.g., 60 days, 100 hours)" 
-                placeholderTextColor="#4d4d4d" 
-                value={newTarget} 
-                onChangeText={setNewTarget} 
-                keyboardType="numeric"
-              />
-              
-              <View style={styles.actionRow}>
-                <TouchableOpacity style={styles.btnSecondary} onPress={() => setModalVisible(false)} disabled={isSubmitting}>
-                  <Text style={styles.btnSecondaryText}>ABORT</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.btnPrimary} onPress={addCampaign} disabled={isSubmitting}>
-                  {isSubmitting ? <ActivityIndicator color="#000" /> : <Text style={styles.btnPrimaryText}>ETCH INTO ARCHIVE</Text>}
-                </TouchableOpacity>
+              <View style={styles.logList}>
+                {historyLog.length === 0 ? (
+                  <Text style={styles.emptyText}>No combat data recorded.</Text>
+                ) : (
+                  historyLog.map((item, index) => (
+                    <MotiView 
+                      key={item.id}
+                      from={{ opacity: 0, translateX: -10 }}
+                      animate={{ opacity: 1, translateX: 0 }}
+                      transition={{ type: 'timing', duration: 300, delay: index * 50 }}
+                      style={styles.logItem}
+                    >
+                      <View style={styles.logLeft}>
+                        <View style={styles.bulletPoint} />
+                        <View>
+                          <Text style={styles.logTaskTitle}>{item.title}</Text>
+                          <Text style={styles.logDate}>{item.date}</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.logXp}>{item.xp}</Text>
+                    </MotiView>
+                  ))
+                )}
               </View>
             </View>
-          </View>
-        </Modal>
-
-      </View>
-    </View>
+          </>
+        )}
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000000' },
-  artBackground: { height: 300, width: '100%' },
-  gradientFade: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 24, paddingBottom: 20 },
-  headerSafeArea: { marginTop: 50 },
-  gateTitle: { color: '#ffffff', fontSize: 12, fontWeight: '700', letterSpacing: 4, opacity: 0.7 },
-  gateSubtitle: { color: '#ffffff', fontSize: 32, fontWeight: 'bold', letterSpacing: 2, marginTop: 4 },
-  voidContent: { flex: 1, backgroundColor: '#000000', paddingHorizontal: 24 },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, borderBottomWidth: 1, borderBottomColor: '#333333', paddingBottom: 10 },
-  sectionHeader: { color: '#aaaaaa', fontSize: 10, letterSpacing: 4 },
-  addText: { color: '#ffffff', fontSize: 10, letterSpacing: 2, fontWeight: 'bold' },
-  emptyText: { color: '#4d4d4d', textAlign: 'center', marginTop: 40, letterSpacing: 2, fontSize: 12 },
-  
-  // Cards
-  campaignCard: { borderWidth: 1, borderColor: '#333333', padding: 20, marginBottom: 15, backgroundColor: '#050505' },
-  campaignCardConquered: { borderColor: '#111111', backgroundColor: '#000000' },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  campaignStatus: { color: '#ffffff', fontSize: 10, fontWeight: 'bold', letterSpacing: 2 },
-  campaignProgress: { color: '#aaaaaa', fontSize: 10, letterSpacing: 1 },
-  campaignTitle: { color: '#ffffff', fontSize: 18, letterSpacing: 1, marginBottom: 20 },
-  textMuted: { color: '#4d4d4d' },
-  progressBarBg: { height: 2, backgroundColor: '#1a1a1a', width: '100%' },
-  progressBarFill: { height: '100%', backgroundColor: '#ffffff' },
-
-  // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#000000', borderWidth: 1, borderColor: '#333333', padding: 30 },
-  systemVoice: { color: '#aaaaaa', fontSize: 10, letterSpacing: 4, marginBottom: 8 },
-  modalTitle: { color: '#ffffff', fontSize: 20, letterSpacing: 2, marginBottom: 30 },
-  inputBox: { backgroundColor: '#000000', borderWidth: 1, borderColor: '#4d4d4d', color: '#ffffff', padding: 16, fontSize: 14, marginBottom: 20, letterSpacing: 1 },
-  actionRow: { flexDirection: 'row', gap: 15, marginTop: 10 },
-  btnPrimary: { flex: 1, backgroundColor: '#ffffff', paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
-  btnPrimaryText: { color: '#000000', fontSize: 10, fontWeight: 'bold', letterSpacing: 2 },
-  btnSecondary: { flex: 1, backgroundColor: '#000000', borderWidth: 1, borderColor: '#ffffff', paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
-  btnSecondaryText: { color: '#ffffff', fontSize: 10, fontWeight: 'bold', letterSpacing: 2 },
+  scrollContent: { padding: 24, paddingTop: 60, paddingBottom: 60 },
+  header: { marginBottom: 40, borderBottomWidth: 1, borderBottomColor: '#222', paddingBottom: 15 },
+  systemSub: { color: '#666', fontSize: 10, letterSpacing: 4, marginBottom: 5 },
+  systemTitle: { color: '#fff', fontSize: 24, fontWeight: 'bold', letterSpacing: 2, marginBottom: 10 },
+  trackerContainer: { backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#1a1a1a', padding: 24, borderRadius: 4, marginBottom: 40 },
+  levelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  levelText: { color: '#ffffff', fontSize: 12, letterSpacing: 2, fontWeight: 'bold' },
+  xpText: { color: '#aaaaaa', fontSize: 10, letterSpacing: 1 },
+  barBackground: { height: 8, backgroundColor: '#111', borderRadius: 4, overflow: 'hidden', marginBottom: 12 },
+  barFill: { height: '100%', backgroundColor: '#ffffff', borderRadius: 4 },
+  nextLevelSub: { color: '#444', fontSize: 9, letterSpacing: 2, textAlign: 'right' },
+  historyContainer: { marginTop: 10 },
+  historyTitle: { color: '#666', fontSize: 10, letterSpacing: 3, marginBottom: 20 },
+  logList: { gap: 16 },
+  emptyText: { color: '#444', fontStyle: 'italic', fontSize: 12, marginTop: 10 },
+  logItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#111', paddingBottom: 16 },
+  logLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 15 },
+  bulletPoint: { width: 4, height: 4, backgroundColor: '#444', borderRadius: 2, marginRight: 15 },
+  logTaskTitle: { color: '#cccccc', fontSize: 13, marginBottom: 4, lineHeight: 18 },
+  logDate: { color: '#555555', fontSize: 9, letterSpacing: 1 },
+  logXp: { color: '#4488ff', fontSize: 11, fontWeight: 'bold', letterSpacing: 1 } // Highlighted XP color
 });

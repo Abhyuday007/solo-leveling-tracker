@@ -1,209 +1,151 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, SafeAreaView, ImageBackground, ScrollView, Dimensions, ActivityIndicator } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { LineChart, ProgressChart } from 'react-native-chart-kit';
+import { View, Text, StyleSheet, SafeAreaView, ScrollView, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
+import { MotiView } from 'moti';
+import * as Haptics from 'expo-haptics';
 import { supabase } from '../../supabase';
 
-const LORE_ART = { uri: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?q=80&w=1000&auto=format&fit=crop' }; 
-const screenWidth = Dimensions.get('window').width;
-
-export default function Gate03_Lore() {
-  const [loading, setLoading] = useState(true);
-  const [playerStats, setPlayerStats] = useState({
-    xp: 0,
-    level: 1,
-    historyLabels: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6'],
-    historyData: [0, 0, 0, 0, 0, 0],
-    skills: [0, 0, 0] // [Strength, Intelligence, Charisma]
+export default function Gate03_Lore({ navigation }: any) {
+  const [playerClass, setPlayerClass] = useState("LOADING...");
+  const [isLoading, setIsLoading] = useState(true);
+  
+  const [stats, setStats] = useState({ strength: 0, wisdom: 0, discipline: 0, focus: 0 });
+  const [insight, setInsight] = useState({ 
+    title: "SYNCING WITH VAULT...", 
+    body: "Retrieving psychological profile." 
   });
 
   useEffect(() => {
-    fetchLoreData();
+    fetchLore();
   }, []);
 
-  async function fetchLoreData() {
-    setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+  const fetchLore = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-    // Fetch all tasks for this player
-    const { data, error } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: true });
+      const { data, error } = await supabase
+        .from('user_campaigns')
+        .select('player_class, starting_stats, empathy_insight')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
 
-    if (error) {
-      console.error('Error fetching lore:', error.message);
-      setLoading(false);
-      return;
-    }
+      if (error) throw error;
 
-    if (data) {
-      processPlayerData(data);
-    }
-  }
-
-  function processPlayerData(tasks: any[]) {
-    let totalXp = 0;
-    let strengthXp = 0;
-    let intXp = 0;
-    let chaXp = 0;
-
-    // 1. Generate the last 6 dates for the X-Axis
-    const last6Days = Array.from({length: 6}, (_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - (5 - i));
-      return d.toISOString().split('T')[0];
-    });
-    
-    // Array to hold the XP earned exactly on those specific days
-    const dailyEarned = [0, 0, 0, 0, 0, 0];
-
-    tasks.forEach(task => {
-      if (task.is_completed) {
-        totalXp += task.xp_reward;
-        
-        // 2. Text Classification Engine (Categorize skills based on task titles)
-        const title = task.title.toLowerCase();
-        if (title.match(/(kg|press|gym|workout|run|squat|physique)/)) {
-          strengthXp += task.xp_reward;
-        } else if (title.match(/(leetcode|ds|ai|data|swayam|code|sql|python|system)/)) {
-          intXp += task.xp_reward;
-        } else {
-          // Leadership, networking, and generic tasks default to Charisma
-          chaXp += task.xp_reward; 
-        }
-
-        // 3. Map completed tasks to the timeline
-        const taskDate = new Date(task.created_at).toISOString().split('T')[0];
-        const dayIndex = last6Days.indexOf(taskDate);
-        if (dayIndex !== -1) {
-            dailyEarned[dayIndex] += task.xp_reward;
-        }
+      if (data) {
+        setPlayerClass(data.player_class);
+        setStats(data.starting_stats);
+        setInsight(data.empathy_insight);
       }
-    });
-
-    // 4. Calculate Cumulative Trajectory for the Line Chart
-    let runningTotal = totalXp - dailyEarned.reduce((a, b) => a + b, 0); // Base XP from before the 6-day window
-    const cumulativeHistory = dailyEarned.map(xp => {
-        runningTotal += xp;
-        return runningTotal;
-    });
-
-    // 5. Calculate Skill Mastery Percentages (Progress Rings require 0.0 to 1.0)
-    // We base the rings on how balanced your current XP pool is
-    const safeTotal = totalXp === 0 ? 1 : totalXp;
-    const skills = [
-      strengthXp / safeTotal, 
-      intXp / safeTotal, 
-      chaXp / safeTotal
-    ];
-
-    setPlayerStats({
-      xp: totalXp,
-      level: Math.floor(totalXp / 200) + 1,
-      historyLabels: last6Days.map(date => date.substring(5)), // Format to MM-DD
-      historyData: cumulativeHistory.every(val => val === 0) ? [0,0,0,0,0,0] : cumulativeHistory,
-      skills: skills
-    });
-    setLoading(false);
-  }
-
-  const chartConfig = {
-    backgroundGradientFrom: '#000000',
-    backgroundGradientTo: '#000000',
-    color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`, 
-    strokeWidth: 2,
-    useShadowColorFromDataset: false,
-    propsForDots: { r: "4", strokeWidth: "1", stroke: "#ffffff" }
+    } catch (error) {
+      console.error("[Gate 03 Error]", error);
+      setPlayerClass("SYSTEM OFFLINE");
+      setInsight({ title: "DATA CORRUPTION", body: "Could not retrieve profile." });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
+  // --- LOGOUT LOGIC ---
+const handleLogout = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    const { error } = await supabase.auth.signOut();
+    
+    if (error) {
+      Alert.alert("Logout Failed", error.message);
+    } else {
+      // Manually reset the entire navigation stack and kick the user to Login
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Gate00_Login' }],
+      });
+    }
+  };
+
+  const statList = [
+    { label: 'STRENGTH', value: stats.strength, color: '#ff4444' },
+    { label: 'WISDOM', value: stats.wisdom, color: '#4488ff' },
+    { label: 'DISCIPLINE', value: stats.discipline, color: '#ffaa00' },
+    { label: 'FOCUS', value: stats.focus, color: '#00ffaa' }
+  ];
+
   return (
-    <View style={styles.container}>
-      <ImageBackground source={LORE_ART} style={styles.artBackground}>
-        <LinearGradient colors={['transparent', 'rgba(0,0,0,0.9)', '#000000']} style={styles.gradientFade}>
-          <SafeAreaView style={styles.headerSafeArea}>
-            <Text style={styles.gateTitle}>GATE 03</Text>
-            <Text style={styles.gateSubtitle}>PLAYER LORE</Text>
-          </SafeAreaView>
-        </LinearGradient>
-      </ImageBackground>
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        
+        <View style={styles.header}>
+          <Text style={styles.systemSub}>GATE 03</Text>
+          <Text style={styles.systemTitle}>PLAYER LORE</Text>
+          <Text style={styles.playerClass}>{playerClass.toUpperCase()}</Text>
+        </View>
 
-      <View style={styles.voidContent}>
-        {loading ? (
-          <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
-            <ActivityIndicator color="#ffffff" size="large" />
-            <Text style={{color: '#aaaaaa', marginTop: 15, letterSpacing: 2}}>COMPILING ARCHIVES...</Text>
-          </View>
+        {isLoading ? (
+          <ActivityIndicator size="large" color="#ffffff" style={{ marginTop: 40 }} />
         ) : (
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 60 }}>
-            
-            <View style={styles.identityBlock}>
-              <Text style={styles.playerName}>ABHYUDAY</Text>
-              <Text style={styles.playerClass}>CLASS: DATA SCIENCE VANGUARD</Text>
-              <Text style={styles.playerRank}>RANK: {playerStats.level >= 10 ? 'A' : playerStats.level >= 5 ? 'C' : 'E'}   |   LEVEL: {playerStats.level}</Text>
+          <>
+            <View style={styles.insightBox}>
+              <Text style={styles.insightSystem}>SYSTEM DIAGNOSTIC</Text>
+              <Text style={styles.insightTitle}>"{insight.title}"</Text>
+              <Text style={styles.insightBody}>{insight.body}</Text>
             </View>
 
-            <Text style={styles.sectionHeader}>XP TRAJECTORY (LAST 6 DAYS)</Text>
-            <View style={styles.chartContainer}>
-              <LineChart
-                data={{
-                  labels: playerStats.historyLabels,
-                  datasets: [{ data: playerStats.historyData }]
-                }}
-                width={screenWidth - 48}
-                height={180}
-                chartConfig={chartConfig}
-                bezier
-                style={styles.chart}
-                withVerticalLines={false}
-                withHorizontalLines={false}
-              />
+            <View style={styles.statsContainer}>
+              <Text style={styles.statsHeader}>BASE ATTRIBUTES</Text>
+              
+              {statList.map((stat, index) => (
+                <View key={index} style={styles.statRow}>
+                  <View style={styles.statLabelRow}>
+                    <Text style={styles.statLabel}>{stat.label}</Text>
+                    <Text style={styles.statValue}>LVL {stat.value}</Text>
+                  </View>
+                  
+                  <View style={styles.barBackground}>
+                    <MotiView 
+                      key={`bar-${stat.value}-${index}`}
+                      from={{ width: '0%' }}
+                      animate={{ width: `${(stat.value / 10) * 100}%` }}
+                      transition={{ type: 'spring', damping: 15, delay: index * 150 }}
+                      style={[styles.barFill, { backgroundColor: stat.color }]}
+                    />
+                  </View>
+                </View>
+              ))}
             </View>
 
-            <Text style={styles.sectionHeader}>SKILL TREE (STR / INT / CHA)</Text>
-            <View style={styles.chartContainer}>
-              <ProgressChart
-                data={{
-                  labels: ['Strength', 'Intelligence', 'Charisma'],
-                  data: playerStats.skills
-                }}
-                width={screenWidth - 48}
-                height={180}
-                strokeWidth={12}
-                radius={28}
-                chartConfig={{
-                  ...chartConfig,
-                  color: (opacity = 1, index) => {
-                    const colors = ['rgba(255,255,255,1)', 'rgba(170,170,170,1)', 'rgba(85,85,85,1)'];
-                    return colors[index || 0];
-                  }
-                }}
-                hideLegend={false}
-                style={styles.chart}
-              />
-            </View>
-          </ScrollView>
+            {/* Logout Button */}
+            <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+              <Text style={styles.logoutBtnText}>SYSTEM LOGOUT</Text>
+            </TouchableOpacity>
+          </>
         )}
-      </View>
-    </View>
+
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000000' },
-  artBackground: { height: 280, width: '100%' },
-  gradientFade: { flex: 1, justifyContent: 'flex-end', paddingHorizontal: 24, paddingBottom: 10 },
-  headerSafeArea: { marginTop: 50 },
-  gateTitle: { color: '#ffffff', fontSize: 12, fontWeight: '700', letterSpacing: 4, opacity: 0.7 },
-  gateSubtitle: { color: '#ffffff', fontSize: 32, fontWeight: 'bold', letterSpacing: 2, marginTop: 4 },
-  voidContent: { flex: 1, backgroundColor: '#000000', paddingHorizontal: 24 },
-  identityBlock: { marginBottom: 30, borderBottomWidth: 1, borderBottomColor: '#333333', paddingBottom: 20 },
-  playerName: { color: '#ffffff', fontSize: 24, letterSpacing: 4, marginBottom: 8 },
-  playerClass: { color: '#aaaaaa', fontSize: 12, letterSpacing: 2, marginBottom: 4 },
-  playerRank: { color: '#ffffff', fontSize: 10, letterSpacing: 2, fontWeight: 'bold' },
-  sectionHeader: { color: '#aaaaaa', fontSize: 10, letterSpacing: 4, marginBottom: 15, marginTop: 10 },
-  chartContainer: { borderWidth: 1, borderColor: '#333333', backgroundColor: '#050505', marginBottom: 25, paddingVertical: 10, alignItems: 'center' },
-  chart: { paddingRight: 0 }
+  scrollContent: { padding: 24, paddingTop: 60, paddingBottom: 60 }, // Added bottom padding for scroll
+  header: { marginBottom: 40, borderBottomWidth: 1, borderBottomColor: '#222', paddingBottom: 15 },
+  systemSub: { color: '#666', fontSize: 10, letterSpacing: 4, marginBottom: 5 },
+  systemTitle: { color: '#fff', fontSize: 24, fontWeight: 'bold', letterSpacing: 2, marginBottom: 10 },
+  playerClass: { color: '#aaaaaa', fontSize: 12, letterSpacing: 3, fontWeight: 'bold' },
+  insightBox: { backgroundColor: '#0a0a0a', borderWidth: 1, borderColor: '#1a1a1a', padding: 24, borderRadius: 4, marginBottom: 40 },
+  insightSystem: { color: '#444', fontSize: 9, letterSpacing: 3, marginBottom: 15 },
+  insightTitle: { color: '#ffffff', fontSize: 16, fontStyle: 'italic', fontWeight: 'bold', marginBottom: 10, lineHeight: 24 },
+  insightBody: { color: '#888888', fontSize: 13, lineHeight: 22 },
+  statsContainer: { marginTop: 10, marginBottom: 40 },
+  statsHeader: { color: '#666', fontSize: 10, letterSpacing: 3, marginBottom: 20 },
+  statRow: { marginBottom: 20 },
+  statLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  statLabel: { color: '#ffffff', fontSize: 11, letterSpacing: 2 },
+  statValue: { color: '#aaaaaa', fontSize: 11, letterSpacing: 1 },
+  barBackground: { height: 6, backgroundColor: '#111111', borderRadius: 3, overflow: 'hidden' },
+  barFill: { height: '100%', borderRadius: 3 },
+  
+  // New Logout Styles
+  logoutBtn: { borderWidth: 1, borderColor: '#333333', paddingVertical: 18, alignItems: 'center', borderRadius: 4, marginTop: 20 },
+  logoutBtnText: { color: '#ff4444', fontSize: 10, fontWeight: 'bold', letterSpacing: 3 }
 });
